@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gesture Tennis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Reset and base */
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #050510;
+        font-family: 'Orbitron', sans-serif;
+        color: #ffffff;
+      }
+
+      /* Full-screen Three.js canvas */
+      #game-canvas {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        display: block;
+        z-index: 0;
+      }
+
+      /* Webcam preview — bottom-left, always on top */
+      #webcam-preview {
+        position: fixed;
+        bottom: 16px;
+        left: 16px;
+        width: 200px;
+        height: 150px;
+        border: 2px solid rgba(120, 80, 255, 0.6);
+        border-radius: 8px;
+        background: #000;
+        z-index: 10;
+        /* Flip horizontally so it acts as a mirror */
+        transform: scaleX(-1);
+      }
+
+      /* ── Scoreboard ─────────────────────────────────────────────────────── */
+      #scoreboard {
+        position: fixed;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+        background: rgba(5, 5, 16, 0.82);
+        border: 1px solid rgba(120, 80, 255, 0.4);
+        border-radius: 12px;
+        padding: 10px 20px 8px;
+        user-select: none;
+        white-space: nowrap;
+      }
+
+      /* Scoreboard table */
+      .sb-table {
+        border-collapse: collapse;
+        font-family: 'Orbitron', sans-serif;
+      }
+      .sb-table th {
+        font-size: 0.42rem;
+        font-weight: 400;
+        letter-spacing: 0.22em;
+        color: rgba(255, 255, 255, 0.38);
+        text-transform: uppercase;
+        padding: 0 10px 5px;
+        text-align: center;
+      }
+      .sb-table td { padding: 0 10px; text-align: center; }
+
+      .sb-name {
+        font-size: 0.5rem;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        color: rgba(255, 255, 255, 0.55);
+        text-align: left !important;
+        padding-right: 14px !important;
+        text-transform: uppercase;
+      }
+      .sb-set {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.45);
+        min-width: 1.4ch;
+      }
+      .sb-set-header { color: rgba(255,255,255,0.25) !important; }
+
+      .sb-games {
+        font-size: 1.7rem;
+        font-weight: 900;
+        color: #ffffff;
+        min-width: 1.8ch;
+        line-height: 1;
+      }
+      .sb-pts {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #a78bfa;
+        min-width: 2.4ch;
+        transition: color 0.2s;
+      }
+      .sb-pts.deuce     { color: #fbbf24; }
+      .sb-pts.advantage { color: #34d399; }
+
+      /* ── Point announcement overlay ──────────────────────────────────────── */
+      #point-announcement {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        z-index: 50;
+        text-align: center;
+        pointer-events: none;
+        opacity: 0;
+        /* base transform; overridden by animation */
+        transform: translate(-50%, -50%);
+      }
+      #point-announcement.show {
+        animation: announcePop 2.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+      }
+      @keyframes announcePop {
+        0%   { opacity: 0; transform: translate(-50%, -36%); }
+        16%  { opacity: 1; transform: translate(-50%, -50%); }
+        72%  { opacity: 1; transform: translate(-50%, -50%); }
+        100% { opacity: 0; transform: translate(-50%, -58%) scale(1.05); }
+      }
+      .announce-main {
+        font-family: 'Orbitron', sans-serif;
+        font-size: clamp(2rem, 5.5vw, 3.8rem);
+        font-weight: 900;
+        letter-spacing: 0.12em;
+        line-height: 1;
+        text-shadow: 0 0 60px currentColor, 0 0 120px currentColor;
+      }
+      .announce-sub {
+        font-family: 'Orbitron', sans-serif;
+        font-size: clamp(0.65rem, 1.4vw, 0.95rem);
+        font-weight: 400;
+        letter-spacing: 0.35em;
+        opacity: 0.72;
+        margin-top: 10px;
+        text-transform: uppercase;
+      }
+
+      /* Gesture HUD — below scoreboard */
+      #gesture-hud {
+        position: fixed;
+        top: 90px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+        font-size: 0.75rem;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: rgba(120, 255, 200, 0.85);
+        background: rgba(5, 5, 16, 0.6);
+        border-radius: 8px;
+        padding: 4px 16px;
+        pointer-events: none;
+        user-select: none;
+        min-width: 160px;
+        text-align: center;
+      }
+
+      /* Loading overlay */
+      #loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #050510;
+        gap: 16px;
+      }
+
+      #loading-overlay h1 {
+        font-size: 2.5rem;
+        font-weight: 900;
+        letter-spacing: 0.15em;
+        background: linear-gradient(135deg, #a78bfa, #34d399);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      #loading-overlay p {
+        font-size: 0.8rem;
+        letter-spacing: 0.2em;
+        color: rgba(255, 255, 255, 0.45);
+      }
+
+      /* ── Power meter — sits above the webcam preview ─────────────────────── */
+      #power-meter-wrap {
+        position: fixed;
+        bottom: 174px;    /* sits directly above the 150px-tall webcam preview + 16px gap */
+        left: 16px;
+        width: 200px;
+        height: 10px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(120,80,255,0.4);
+        border-radius: 6px;
+        overflow: hidden;
+        z-index: 10;
+      }
+      #power-meter-bar {
+        height: 100%;
+        width: 0%;
+        background: rgb(80,220,80);
+        border-radius: 6px;
+        transition: width 0.05s, background 0.1s;  /* snappy response */
+      }
+      #power-meter-label {
+        position: fixed;
+        bottom: 188px;
+        left: 16px;
+        font-size: 0.38rem;
+        letter-spacing: 0.18em;
+        color: rgba(255,255,255,0.35);
+        z-index: 10;
+        text-transform: uppercase;
+        user-select: none;
+      }
+
+      /* ── Start screen — shown after camera initialises, before game starts ── */
+      #start-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 90;
+        display: none;    /* shown by JS after tracker.start() resolves */
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: rgba(5,5,16,0.96);
+        gap: 0;
+      }
+      #start-screen h1 {
+        font-size: clamp(1.8rem, 4vw, 3rem);
+        font-weight: 900;
+        letter-spacing: 0.15em;
+        background: linear-gradient(135deg, #a78bfa, #34d399);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 28px;
+      }
+      .start-how-title {
+        font-size: 0.55rem;
+        letter-spacing: 0.3em;
+        color: rgba(255,255,255,0.4);
+        margin-bottom: 18px;
+        text-transform: uppercase;
+      }
+      .start-gestures {
+        display: flex;
+        gap: 28px;
+        margin-bottom: 32px;
+      }
+      .start-gesture-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        width: 110px;
+        padding: 14px 10px;
+        border: 1px solid rgba(120,80,255,0.3);
+        border-radius: 10px;
+        background: rgba(120,80,255,0.06);
+      }
+      .start-gesture-icon {
+        font-size: 1.6rem;   /* emoji icons */
+        line-height: 1;
+      }
+      .start-gesture-name {
+        font-size: 0.52rem;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        color: #a78bfa;
+        text-transform: uppercase;
+      }
+      .start-gesture-desc {
+        font-size: 0.42rem;
+        letter-spacing: 0.1em;
+        color: rgba(255,255,255,0.45);
+        text-align: center;
+        line-height: 1.6;
+        text-transform: uppercase;
+      }
+      .start-tip {
+        font-size: 0.48rem;
+        letter-spacing: 0.15em;
+        color: rgba(255,255,255,0.35);
+        margin-bottom: 28px;
+        text-transform: uppercase;
+        text-align: center;
+        max-width: 360px;
+        line-height: 1.7;
+      }
+      #start-countdown {
+        font-size: 2.8rem;
+        font-weight: 900;
+        color: #34d399;
+        min-width: 2ch;
+        text-align: center;
+        letter-spacing: 0.05em;
+        transition: color 0.3s;
+      }
+      .start-countdown-label {
+        font-size: 0.42rem;
+        letter-spacing: 0.2em;
+        color: rgba(255,255,255,0.3);
+        text-transform: uppercase;
+        margin-top: 4px;
+        text-align: center;
+      }
+
+      /* ── Game over screen ────────────────────────────────────────────────── */
+      #gameover-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 90;
+        display: none;    /* shown by JS on match over */
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: rgba(5,5,16,0.94);
+        gap: 0;
+      }
+      #gameover-title {
+        font-size: clamp(2.5rem, 6vw, 4.5rem);
+        font-weight: 900;
+        letter-spacing: 0.12em;
+        text-shadow: 0 0 60px currentColor;
+        margin-bottom: 16px;
+      }
+      #gameover-sets {
+        font-size: 1.2rem;
+        letter-spacing: 0.2em;
+        color: rgba(255,255,255,0.6);
+        margin-bottom: 48px;
+      }
+      /* Circular progress ring for the restart gesture */
+      #restart-progress {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: conic-gradient(rgba(120,255,180,0.9) 0%, rgba(255,255,255,0.08) 0%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 10px;
+      }
+      #restart-progress::before {
+        content: '';
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: rgba(5,5,16,0.97);  /* punches a hole in the conic gradient */
+      }
+      #restart-label {
+        font-size: 0.48rem;
+        letter-spacing: 0.18em;
+        color: rgba(255,255,255,0.45);
+        text-transform: uppercase;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Three.js renders into this canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Gesture skeleton overlay (drawn in JS on top of webcam feed) -->
+    <canvas id="webcam-preview" width="200" height="150"></canvas>
+
+    <!-- Scoreboard — inner structure built by Scoreboard.js -->
+    <div id="scoreboard"></div>
+
+    <!-- Gesture HUD -->
+    <div id="gesture-hud">READY</div>
+
+    <!-- Centred point/game/set announcement (2-second animated overlay) -->
+    <div id="point-announcement" aria-live="assertive">
+      <div class="announce-main"></div>
+      <div class="announce-sub"></div>
+    </div>
+
+    <!-- Loading overlay — hidden by JS once everything is ready -->
+    <div id="loading-overlay">
+      <h1>GESTURE TENNIS</h1>
+      <p>INITIALIZING CAMERA &amp; HAND TRACKING…</p>
+    </div>
+
+    <!-- Power meter — above webcam preview, driven by SwingDetector velocity -->
+    <div id="power-meter-label">SWING POWER</div>
+    <div id="power-meter-wrap">
+      <div id="power-meter-bar"></div>
+    </div>
+
+    <!-- Start screen — shown after camera init, auto-dismisses after countdown -->
+    <div id="start-screen">
+      <h1>GESTURE TENNIS</h1>
+      <p class="start-how-title">How to play</p>
+      <div class="start-gestures">
+        <div class="start-gesture-card">
+          <div class="start-gesture-icon">🎾</div>
+          <div class="start-gesture-name">Forehand</div>
+          <div class="start-gesture-desc">Swing your hand<br>left → right</div>
+        </div>
+        <div class="start-gesture-card">
+          <div class="start-gesture-icon">🤚</div>
+          <div class="start-gesture-name">Backhand</div>
+          <div class="start-gesture-desc">Swing your hand<br>right → left</div>
+        </div>
+        <div class="start-gesture-card">
+          <div class="start-gesture-icon">⬇️</div>
+          <div class="start-gesture-name">Smash</div>
+          <div class="start-gesture-desc">Swing your hand<br>sharply down</div>
+        </div>
+      </div>
+      <p class="start-tip">
+        Face your palm toward the camera.<br>
+        Keep your hand clearly visible in the preview.
+      </p>
+      <div id="start-countdown">5</div>
+      <div class="start-countdown-label">Starting in…</div>
+    </div>
+
+    <!-- Game over screen — shown on match end; open palm held 2 s to restart -->
+    <div id="gameover-screen">
+      <div id="gameover-title">YOU WIN!</div>
+      <div id="gameover-sets"></div>
+      <div id="restart-progress"></div>
+      <div id="restart-label">HOLD OPEN PALM</div>
+    </div>
+
+    <!--
+      MediaPipe packages are legacy IIFE bundles — they register to window
+      globals (Hands, HAND_CONNECTIONS, Camera, drawConnectors, drawLandmarks).
+      They must be loaded as plain scripts BEFORE the ES module entry point.
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
